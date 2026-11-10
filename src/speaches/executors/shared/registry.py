@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from speaches.executors.duo import MODEL_ID as DUO_MODEL_ID, DuoModelManager, DuoModelRegistry
 from speaches.executors.kokoro import KokoroModelRegistry
 from speaches.executors.parakeet import NemoConformerTdtModelRegistry
 from speaches.executors.piper import PiperModelRegistry
@@ -31,6 +32,14 @@ from speaches.executors.whisper import WhisperModelManager, whisper_model_regist
 
 class ExecutorRegistry:
     def __init__(self, config: Config) -> None:
+        self._duo_executor = None
+        if config.duo_model_dir is not None:
+            self._duo_executor = Executor[DuoModelManager, DuoModelRegistry](
+                name="duo",
+                model_manager=DuoModelManager(config.stt_model_ttl, config.duo_model_dir, config.duo_device, config.duo_threads),
+                model_registry=DuoModelRegistry(config.duo_model_dir),
+                task="automatic-speech-recognition",
+            )
         self._whisper_executor = Executor[WhisperModelManager, WhisperModelRegistry](
             name="whisper",
             model_manager=WhisperModelManager(config.stt_model_ttl, config.whisper),
@@ -78,6 +87,9 @@ class ExecutorRegistry:
             task="voice-activity-detection",
         )
 
+    def local_transcription_executor(self, model_id: str):
+        return self._duo_executor if model_id == DUO_MODEL_ID else None
+
     @property
     def transcription(self):  # noqa: ANN201
         return (self._whisper_executor, self._parakeet_executor)
@@ -104,6 +116,7 @@ class ExecutorRegistry:
 
     def all_executors(self):  # noqa: ANN201
         return (
+            *([self._duo_executor] if self._duo_executor is not None else []),
             self._whisper_executor,
             self._parakeet_executor,
             self._piper_executor,

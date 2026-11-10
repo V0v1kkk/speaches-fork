@@ -1,4 +1,5 @@
 from typing import Any, Literal
+from pathlib import Path
 
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -122,6 +123,10 @@ class Config(BaseSettings):
     chat_completion_api_key: SecretStr = SecretStr("cant-be-empty")
 
     unstable_ort_opts: OrtOptions = OrtOptions()
+
+    duo_model_dir: Path | None = None
+    duo_device: str = "GPU.0"
+    duo_threads: int = Field(default=2, ge=1)
 
     otel_exporter_otlp_endpoint: str | None = None
     """

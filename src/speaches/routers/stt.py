@@ -146,10 +146,12 @@ def transcribe_file(
             "It only makes sense to provide `timestamp_granularities[]` when `response_format` is set to `verbose_json`. See https://platform.openai.com/docs/api-reference/audio/createTranscription#audio-createtranscription-timestamp_granularities."
         )
 
-    transcription_model_card_data = get_model_card_data_or_raise(model)
-    transcription_executor = find_executor_for_model_or_raise(
-        model, transcription_model_card_data, executor_registry.transcription
-    )
+    transcription_executor = executor_registry.local_transcription_executor(model)
+    if transcription_executor is None:
+        transcription_model_card_data = get_model_card_data_or_raise(model)
+        transcription_executor = find_executor_for_model_or_raise(
+            model, transcription_model_card_data, executor_registry.transcription
+        )
 
     vad_request = VadRequest(audio=audio, vad_options=DEFAULT_VAD_OPTIONS)
     speech_segments = executor_registry.vad.model_manager.handle_vad_request(vad_request)
