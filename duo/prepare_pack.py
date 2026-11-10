@@ -1,4 +1,5 @@
 """Create a checked local Duo pack without modifying the source model bundle."""
+
 import argparse
 import hashlib
 import json
@@ -11,6 +12,7 @@ EXPECTED = {
     "decoder.onnx": "72cb006e66552ba022dc584f51d3cf848f741b68c48e203b05fd2ff5d83e42cd",
     "joint.onnx": "a9d82276bb4a1005382c7d6cb143fcdba40b0a354c799b05f9f5b672fc12b3b9",
     "vocab.txt": "9423827d28725ce78c70bf503d5f0a97545702854251dd53943961b27ae9b9ec",
+    "source-config.yaml": "55c0e38cfccd2aaded76150f31754f2c80eb985892ceb6e2b37860fa99789ec7",
 }
 
 

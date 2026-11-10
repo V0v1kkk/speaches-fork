@@ -1,22 +1,23 @@
 """GigaAM Duo adapter using the existing Speaches VAD and onnx-asr decoder."""
+
 from collections.abc import Generator
 from pathlib import Path
 
 import numpy as np
 from onnx_asr.adapters import TextResultsAsrAdapter
-from speaches.executors.duo_backend import load_duo_model
 from openai.types.audio import Transcription
 
 from speaches.api_types import Model
+from speaches.executors.duo_backend import load_duo_model
 from speaches.executors.shared.base_model_manager import BaseModelManager
-from speaches.executors.shared.handler_protocol import TranscriptionRequest
+from speaches.executors.shared.handler_protocol import NonStreamingTranscriptionResponse, TranscriptionRequest
 from speaches.hf_utils import HfModelFilter
 from speaches.model_registry import ModelRegistry
 
 MODEL_ID = "gigaam-duo-1.3"
 
 
-class DuoModelRegistry(ModelRegistry):
+class DuoModelRegistry(ModelRegistry[Model, Path]):
     def __init__(self, model_dir: Path) -> None:
         super().__init__(HfModelFilter(model_name=MODEL_ID, task="automatic-speech-recognition"))
         self.model_dir = model_dir
@@ -35,7 +36,7 @@ class DuoModelRegistry(ModelRegistry):
         return self.model_dir
 
     def download_model_files(self, model_id: str) -> None:
-        raise ValueError("Duo is installed from a local prepared model pack")
+        raise ValueError(f"{model_id} is installed from a local prepared model pack")
 
 
 class DuoModelManager(BaseModelManager[TextResultsAsrAdapter]):
@@ -50,7 +51,9 @@ class DuoModelManager(BaseModelManager[TextResultsAsrAdapter]):
             raise ValueError(f"Unsupported model {model_id}")
         return load_duo_model(self.model_dir, device=self.device, threads=self.threads)
 
-    def handle_transcription_request(self, request: TranscriptionRequest, **_kwargs):
+    def handle_transcription_request(
+        self, request: TranscriptionRequest, **_kwargs
+    ) -> NonStreamingTranscriptionResponse:
         if request.stream or request.response_format not in ("text", "json"):
             raise ValueError("Duo currently supports non-streaming text and json responses")
         if request.audio.sample_rate != 16000:
@@ -65,7 +68,7 @@ class DuoModelManager(BaseModelManager[TextResultsAsrAdapter]):
                     # segments rather than silently sending an unbounded encoder input.
                     if segment.end - segment.start > 31 * 16000:
                         raise ValueError("VAD segment exceeds 31 seconds")
-                    audio = request.audio.data[segment.start:segment.end]
+                    audio = request.audio.data[segment.start : segment.end]
                     if len(audio) < 320:
                         audio = np.pad(audio, (0, 320 - len(audio)))
                     text = model.recognize(audio)

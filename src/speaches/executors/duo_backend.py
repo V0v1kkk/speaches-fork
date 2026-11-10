@@ -4,32 +4,35 @@ The pack contains the original graphs, converted indexed vocabulary, config and
 exact frontend coefficients. Its preparation and provenance are documented by
 its producer. No weights are downloaded by this loader.
 """
-from pathlib import Path
+
 import hashlib
+from pathlib import Path
 import re
 
 import numpy as np
-import onnxruntime as rt
-
+from numpy.typing import NDArray
 from onnx_asr.adapters import TextResultsAsrAdapter
 from onnx_asr.models.gigaam import GigaamV2Rnnt
 from onnx_asr.preprocessors.numpy_preprocessor import GigaamPreprocessorNumpy
 from onnx_asr.preprocessors.resampler import Resampler
+import onnxruntime as rt
 from scipy.fft import rfft
 
 
 class DuoPreprocessor(GigaamPreprocessorNumpy):
     """GigaAM v3 NumPy frontend with Duo's full-precision coefficients and FFT."""
 
-    def __init__(self, window, filters):
+    def __init__(self, window: NDArray[np.float32], filters: NDArray[np.float32]) -> None:
         super().__init__("gigaam_v3")
         self._window = window
         self._melscale_fbanks = filters
 
-    def __call__(self, waveforms, waveforms_lens):
-        frames = np.lib.stride_tricks.sliding_window_view(waveforms, self._win_length, axis=1)[:, ::self._hop_length]
+    def __call__(
+        self, waveforms: NDArray[np.float32], waveforms_lens: NDArray[np.int64]
+    ) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
+        frames = np.lib.stride_tricks.sliding_window_view(waveforms, self._win_length, axis=1)[:, :: self._hop_length]
         spectrum = rfft(frames * self._window, self._n_fft, axis=-1, workers=1)
-        energy = (spectrum.real ** 2 + spectrum.imag ** 2) @ self._melscale_fbanks
+        energy = (spectrum.real**2 + spectrum.imag**2) @ self._melscale_fbanks
         np.maximum(energy, np.float32(1e-9), out=energy)
         np.log(energy, out=energy)
         if not np.isfinite(energy).all():
@@ -38,13 +41,17 @@ class DuoPreprocessor(GigaamPreprocessorNumpy):
 
 
 class DuoRnnt(GigaamV2Rnnt):
-    def _encode(self, features, features_lens):
+    def _encode(
+        self, features: NDArray[np.float32], features_lens: NDArray[np.int64]
+    ) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
         output, lengths = super()._encode(features, features_lens)
         if not np.isfinite(output).all():
             raise ValueError("Non-finite Duo encoder output")
         return output, lengths
 
-    def _decode(self, tokens, state, frame):
+    def _decode(
+        self, tokens: list[int], state: list[NDArray[np.float32]], frame: NDArray[np.float32]
+    ) -> tuple[NDArray[np.float32], int, list[NDArray[np.float32]]]:
         logits, step, new_state = super()._decode(tokens, state, frame)
         if not np.isfinite(logits).all() or any(not np.isfinite(value).all() for value in new_state):
             raise ValueError("Non-finite Duo predictor or joint output")
@@ -71,8 +78,13 @@ def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -
     if threads < 1:
         raise ValueError("threads must be positive")
     directory = Path(path)
-    names = {"encoder": "encoder.onnx", "decoder": "decoder.onnx", "joint": "joint.onnx",
-             "vocab": "vocab.indexed.txt", "config": "config.json"}
+    names = {
+        "encoder": "encoder.onnx",
+        "decoder": "decoder.onnx",
+        "joint": "joint.onnx",
+        "vocab": "vocab.indexed.txt",
+        "config": "config.json",
+    }
     model_files = {key: directory / value for key, value in names.items()}
     for name, expected in _PACK_HASHES.items():
         file = directory / name
@@ -82,9 +94,14 @@ def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -
     with np.load(directory / "frontend.npz", allow_pickle=False) as constants:
         window = constants["window"]
         filters = constants["filters"]
-    if (window.shape != (320,) or filters.shape != (161, 64) or
-        window.dtype != np.float32 or filters.dtype != np.float32 or
-        not np.isfinite(window).all() or not np.isfinite(filters).all()):
+    if (
+        window.shape != (320,)
+        or filters.shape != (161, 64)
+        or window.dtype != np.float32
+        or filters.dtype != np.float32
+        or not np.isfinite(window).all()
+        or not np.isfinite(filters).all()
+    ):
         raise ValueError("Invalid Duo frontend constants")
 
     options = rt.SessionOptions()
@@ -99,8 +116,11 @@ def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -
         # Register once per process. A missing or ambiguous device fails closed.
         if not any(d.ep_name == ov_ep.get_ep_name() for d in rt.get_ep_devices()):
             rt.register_execution_provider_library("openvino_ep", ov_ep.get_library_path())
-        devices = [d for d in rt.get_ep_devices()
-                   if d.ep_name == ov_ep.get_ep_name() and d.ep_metadata.get("ov_device") == device]
+        devices = [
+            d
+            for d in rt.get_ep_devices()
+            if d.ep_name == ov_ep.get_ep_name() and d.ep_metadata.get("ov_device") == device
+        ]
         if len(devices) != 1:
             raise RuntimeError(f"Expected exactly one OpenVINO device {device!r}, found {len(devices)}")
         options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
@@ -115,10 +135,10 @@ def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -
         return DuoPreprocessor(window, filters)
 
     model = DuoRnnt(model_files, frontend, graph_options)
-    if model._blank_idx != 1024 or model._vocab_size != 1025 or model._max_tokens_per_step != 10:
+    if model._blank_idx != 1024 or model._vocab_size != 1025 or model._max_tokens_per_step != 10:  # noqa: SLF001
         raise ValueError("Invalid Duo vocabulary or model configuration")
     if device != "cpu":
-        for session in (model._encoder, model._decoder, model._joiner):
+        for session in (model._encoder, model._decoder, model._joiner):  # noqa: SLF001
             session.disable_fallback()
             if "OpenVINOExecutionProvider" not in session.get_providers():
                 raise RuntimeError("Duo graph did not attach to OpenVINO")

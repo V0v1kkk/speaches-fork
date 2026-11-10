@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from fastapi import (
     APIRouter,
     Form,
+    HTTPException,
     Request,
     Response,
 )
@@ -102,7 +103,6 @@ async def get_timestamp_granularities(request: Request) -> TimestampGranularitie
 def transcription_response_to_http_response(
     res: NonStreamingTranscriptionResponse | Generator[StreamingTranscriptionEvent],
 ) -> Response | StreamingResponse:
-    logger.error(f"Unexpected streaming transcription response type: {type(res)}")
     if isinstance(res, tuple):
         text, media_type = res
         return Response(content=text, media_type=media_type)
@@ -147,6 +147,8 @@ def transcribe_file(
         )
 
     transcription_executor = executor_registry.local_transcription_executor(model)
+    if transcription_executor is not None and (stream or response_format not in ("text", "json")):
+        raise HTTPException(status_code=400, detail="Duo supports non-streaming text and json responses")
     if transcription_executor is None:
         transcription_model_card_data = get_model_card_data_or_raise(model)
         transcription_executor = find_executor_for_model_or_raise(
