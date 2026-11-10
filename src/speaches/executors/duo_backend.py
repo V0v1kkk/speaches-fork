@@ -124,6 +124,7 @@ def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -
         if len(devices) != 1:
             raise RuntimeError(f"Expected exactly one OpenVINO device {device!r}, found {len(devices)}")
         options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
+        options.add_session_config_entry("session.record_ep_graph_assignment_info", "1")
         options.add_provider_for_devices(devices, {"load_config": '{"GPU":{"INFERENCE_PRECISION_HINT":"f32"}}'})
         graph_options = {"sess_options": options}
     else:
@@ -140,6 +141,7 @@ def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -
     if device != "cpu":
         for session in (model._encoder, model._decoder, model._joiner):  # noqa: SLF001
             session.disable_fallback()
-            if "OpenVINOExecutionProvider" not in session.get_providers():
-                raise RuntimeError("Duo graph did not attach to OpenVINO")
+            assignments = session.get_provider_graph_assignment_info()
+            if not assignments or any(part.ep_name != "OpenVINOExecutionProvider" for part in assignments):
+                raise RuntimeError("Duo graph is not fully assigned to OpenVINO")
     return TextResultsAsrAdapter(model, Resampler(16_000, {"providers": ["CPUExecutionProvider"]}))

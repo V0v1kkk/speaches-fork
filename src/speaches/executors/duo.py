@@ -9,12 +9,11 @@ from openai.types.audio import Transcription
 
 from speaches.api_types import Model
 from speaches.executors.duo_backend import load_duo_model
+from speaches.executors.duo_model_id import MODEL_ID
 from speaches.executors.shared.base_model_manager import BaseModelManager
 from speaches.executors.shared.handler_protocol import NonStreamingTranscriptionResponse, TranscriptionRequest
 from speaches.hf_utils import HfModelFilter
 from speaches.model_registry import ModelRegistry
-
-MODEL_ID = "gigaam-duo-1.3"
 
 
 class DuoModelRegistry(ModelRegistry[Model, Path]):

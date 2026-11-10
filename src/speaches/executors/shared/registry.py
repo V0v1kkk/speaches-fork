@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from speaches.executors.duo import MODEL_ID as DUO_MODEL_ID
-from speaches.executors.duo import DuoModelManager, DuoModelRegistry
+from speaches.executors.duo_model_id import MODEL_ID as DUO_MODEL_ID
 from speaches.executors.kokoro import KokoroModelRegistry
 from speaches.executors.parakeet import NemoConformerTdtModelRegistry
 from speaches.executors.piper import PiperModelRegistry
@@ -18,6 +17,7 @@ from speaches.executors.whisper import WhisperModelRegistry
 
 if TYPE_CHECKING:
     from speaches.config import Config
+    from speaches.executors.duo import DuoModelManager, DuoModelRegistry
 
 from speaches.executors.kokoro import KokoroModelManager, kokoro_model_registry
 from speaches.executors.parakeet import ParakeetModelManager, parakeet_model_registry
@@ -35,6 +35,8 @@ class ExecutorRegistry:
     def __init__(self, config: Config) -> None:
         self._duo_executor: Executor[DuoModelManager, DuoModelRegistry] | None = None
         if config.duo_model_dir is not None:
+            from speaches.executors.duo import DuoModelManager, DuoModelRegistry
+
             self._duo_executor = Executor[DuoModelManager, DuoModelRegistry](
                 name="duo",
                 model_manager=DuoModelManager(
