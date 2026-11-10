@@ -42,6 +42,32 @@ class DuoPreprocessor(GigaamPreprocessorNumpy):
         return energy.transpose(0, 2, 1), (waveforms_lens - self._win_length) // self._hop_length + 1
 
 
+class CheckedPredictorSession:
+    """Validate predictor tensors before they can be fed into the joint graph."""
+
+    def __init__(self, session: rt.InferenceSession) -> None:
+        self.session = session
+
+    def run(self, output_names: list[str], feed: dict[str, object]) -> list[NDArray[np.float32]]:
+        tokens = np.asarray(feed["x"])
+        if tokens.shape != (1, 1) or tokens.dtype != np.int64:
+            raise ValueError("Invalid Duo predictor token input")
+        for name in ("h.1", "c.1"):
+            value = np.asarray(feed[name])
+            if value.shape != (1, 1, 320) or value.dtype != np.float32 or not np.isfinite(value).all():
+                raise ValueError("Invalid Duo predictor state input")
+        outputs = self.session.run(output_names, feed)
+        if len(outputs) != 3 or any(
+            not isinstance(value, np.ndarray)
+            or value.shape != (1, 1, 320)
+            or value.dtype != np.float32
+            or not np.isfinite(value).all()
+            for value in outputs
+        ):
+            raise ValueError("Invalid Duo predictor output")
+        return outputs
+
+
 class DuoRnnt(GigaamV2Rnnt):
     def _encode(
         self, features: NDArray[np.float32], features_lens: NDArray[np.int64]
@@ -63,6 +89,8 @@ class DuoRnnt(GigaamV2Rnnt):
         # be finite. Only individual -Inf values in final LogSoftmax are valid.
         if any(not np.isfinite(value).all() for value in (*state, *new_state)):
             raise ValueError("Non-finite Duo predictor output")
+        if logits.shape != (1025,) or logits.dtype != np.float32:
+            raise ValueError("Invalid Duo joint output shape or dtype")
         if np.isnan(logits).any() or np.isposinf(logits).any() or np.isneginf(logits).all():
             raise ValueError("Invalid Duo joint LogSoftmax output")
         return logits, step, new_state
@@ -154,4 +182,7 @@ def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -
             assignments = session.get_provider_graph_assignment_info()
             if not assignments or any(part.ep_name != "OpenVINOExecutionProvider" for part in assignments):
                 raise RuntimeError("Duo graph is not fully assigned to OpenVINO")
+    # The original RNNT implementation caches predictor outputs then sends
+    # them to joint; validate inside run so invalid tensors never reach joint.
+    model._decoder = CheckedPredictorSession(model._decoder)  # noqa: SLF001
     return TextResultsAsrAdapter(model, Resampler(16_000, {"providers": ["CPUExecutionProvider"]}))

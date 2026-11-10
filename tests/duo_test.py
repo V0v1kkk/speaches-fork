@@ -65,7 +65,8 @@ def test_joint_accepts_individual_negative_infinity(monkeypatch: pytest.MonkeyPa
 
     from speaches.executors.duo_backend import DuoRnnt
 
-    logits = np.array([0.0, -np.inf, -2.0], dtype=np.float32)
+    logits = np.zeros(1025, dtype=np.float32)
+    logits[1] = -np.inf
     monkeypatch.setattr(GigaamV2Rnnt, "_decode", lambda _self, _tokens, state, _frame: (logits, -1, state))
     model = object.__new__(DuoRnnt)
     actual, _, _ = model._decode([], [np.zeros(1, dtype=np.float32)], np.zeros(1, dtype=np.float32))  # noqa: SLF001
@@ -78,7 +79,8 @@ def test_joint_rejects_invalid_logsoftmax(monkeypatch: pytest.MonkeyPatch, bad: 
 
     from speaches.executors.duo_backend import DuoRnnt
 
-    logits = np.array(bad, dtype=np.float32)
+    logits = np.full(1025, bad[1], dtype=np.float32)
+    logits[0] = bad[0]
     monkeypatch.setattr(GigaamV2Rnnt, "_decode", lambda _self, _tokens, state, _frame: (logits, -1, state))
     model = object.__new__(DuoRnnt)
     with pytest.raises(ValueError, match="joint LogSoftmax"):
@@ -95,7 +97,9 @@ def test_predictor_and_encoder_nonfinite_fail(monkeypatch: pytest.MonkeyPatch) -
     bad = np.array([np.inf], dtype=np.float32)
     with pytest.raises(ValueError, match="predictor or joint input"):
         model._decode([], [bad], finite)  # noqa: SLF001
-    monkeypatch.setattr(GigaamV2Rnnt, "_decode", lambda _self, _tokens, _state, _frame: (finite, -1, [bad]))
+    monkeypatch.setattr(
+        GigaamV2Rnnt, "_decode", lambda _self, _tokens, _state, _frame: (np.zeros(1025, dtype=np.float32), -1, [bad])
+    )
     with pytest.raises(ValueError, match="predictor output"):
         model._decode([], [finite], finite)  # noqa: SLF001
     with pytest.raises(ValueError, match="encoder input"):
@@ -103,3 +107,32 @@ def test_predictor_and_encoder_nonfinite_fail(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(GigaamV2Rnnt, "_encode", lambda _self, _features, lengths: (bad, lengths))
     with pytest.raises(ValueError, match="encoder output"):
         model._encode(finite, np.ones(1, dtype=np.int64))  # noqa: SLF001
+
+
+def test_predictor_validation_precedes_joint_and_blocks_bad_input() -> None:
+    from speaches.executors.duo_backend import CheckedPredictorSession
+
+    class FakeSession:
+        calls = 0
+        bad_output = False
+
+        def run(self, _names: list[str], _feed: dict[str, object]) -> list[np.typing.NDArray[np.float32]]:
+            self.calls += 1
+            result = [np.zeros((1, 1, 320), dtype=np.float32) for _ in range(3)]
+            if self.bad_output:
+                result[0][0, 0, 0] = -np.inf
+            return result
+
+    fake = FakeSession()
+    session = CheckedPredictorSession(fake)  # type: ignore[arg-type]
+    state = np.zeros((1, 1, 320), dtype=np.float32)
+    feed = {"x": [[1024]], "h.1": state, "c.1": state.copy()}
+    assert len(session.run(["dec", "h", "c"], feed)) == 3
+    bad_state = state.copy()
+    bad_state[0, 0, 0] = np.nan
+    with pytest.raises(ValueError, match="state input"):
+        session.run(["dec", "h", "c"], {**feed, "h.1": bad_state})
+    assert fake.calls == 1
+    fake.bad_output = True
+    with pytest.raises(ValueError, match="predictor output"):
+        session.run(["dec", "h", "c"], feed)
