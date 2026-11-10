@@ -58,3 +58,48 @@ def test_invalid_segments_fail_closed(monkeypatch: pytest.MonkeyPatch, tmp_path:
     n = 31 * 16000 + 1
     with pytest.raises(ValueError, match="exceeds"):
         manager.handle_transcription_request(request(n, [SpeechTimestamp(start=0, end=n)]))
+
+
+def test_joint_accepts_individual_negative_infinity(monkeypatch: pytest.MonkeyPatch) -> None:
+    from onnx_asr.models.gigaam import GigaamV2Rnnt
+
+    from speaches.executors.duo_backend import DuoRnnt
+
+    logits = np.array([0.0, -np.inf, -2.0], dtype=np.float32)
+    monkeypatch.setattr(GigaamV2Rnnt, "_decode", lambda _self, _tokens, state, _frame: (logits, -1, state))
+    model = object.__new__(DuoRnnt)
+    actual, _, _ = model._decode([], [np.zeros(1, dtype=np.float32)], np.zeros(1, dtype=np.float32))  # noqa: SLF001
+    assert np.array_equal(actual, logits)
+
+
+@pytest.mark.parametrize("bad", [[np.nan, 0.0], [np.inf, 0.0], [-np.inf, -np.inf]])
+def test_joint_rejects_invalid_logsoftmax(monkeypatch: pytest.MonkeyPatch, bad: list[float]) -> None:
+    from onnx_asr.models.gigaam import GigaamV2Rnnt
+
+    from speaches.executors.duo_backend import DuoRnnt
+
+    logits = np.array(bad, dtype=np.float32)
+    monkeypatch.setattr(GigaamV2Rnnt, "_decode", lambda _self, _tokens, state, _frame: (logits, -1, state))
+    model = object.__new__(DuoRnnt)
+    with pytest.raises(ValueError, match="joint LogSoftmax"):
+        model._decode([], [np.zeros(1, dtype=np.float32)], np.zeros(1, dtype=np.float32))  # noqa: SLF001
+
+
+def test_predictor_and_encoder_nonfinite_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    from onnx_asr.models.gigaam import GigaamV2Rnnt
+
+    from speaches.executors.duo_backend import DuoRnnt
+
+    model = object.__new__(DuoRnnt)
+    finite = np.zeros(1, dtype=np.float32)
+    bad = np.array([np.inf], dtype=np.float32)
+    with pytest.raises(ValueError, match="predictor or joint input"):
+        model._decode([], [bad], finite)  # noqa: SLF001
+    monkeypatch.setattr(GigaamV2Rnnt, "_decode", lambda _self, _tokens, _state, _frame: (finite, -1, [bad]))
+    with pytest.raises(ValueError, match="predictor output"):
+        model._decode([], [finite], finite)  # noqa: SLF001
+    with pytest.raises(ValueError, match="encoder input"):
+        model._encode(bad, np.ones(1, dtype=np.int64))  # noqa: SLF001
+    monkeypatch.setattr(GigaamV2Rnnt, "_encode", lambda _self, _features, lengths: (bad, lengths))
+    with pytest.raises(ValueError, match="encoder output"):
+        model._encode(finite, np.ones(1, dtype=np.int64))  # noqa: SLF001

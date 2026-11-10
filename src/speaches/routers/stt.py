@@ -11,6 +11,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import StreamingResponse
+import numpy as np
 import openai.types.audio
 
 from speaches.api_types import (
@@ -149,6 +150,8 @@ def transcribe_file(
     transcription_executor = executor_registry.local_transcription_executor(model)
     if transcription_executor is not None and (stream or response_format not in ("text", "json")):
         raise HTTPException(status_code=400, detail="Duo supports non-streaming text and json responses")
+    if transcription_executor is not None and not np.isfinite(audio.data).all():
+        raise HTTPException(status_code=400, detail="Duo audio must contain only finite samples")
     if transcription_executor is None:
         transcription_model_card_data = get_model_card_data_or_raise(model)
         transcription_executor = find_executor_for_model_or_raise(

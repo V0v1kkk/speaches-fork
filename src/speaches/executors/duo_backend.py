@@ -30,6 +30,8 @@ class DuoPreprocessor(GigaamPreprocessorNumpy):
     def __call__(
         self, waveforms: NDArray[np.float32], waveforms_lens: NDArray[np.int64]
     ) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
+        if not np.isfinite(waveforms).all():
+            raise ValueError("Non-finite Duo waveform input")
         frames = np.lib.stride_tricks.sliding_window_view(waveforms, self._win_length, axis=1)[:, :: self._hop_length]
         spectrum = rfft(frames * self._window, self._n_fft, axis=-1, workers=1)
         energy = (spectrum.real**2 + spectrum.imag**2) @ self._melscale_fbanks
@@ -44,6 +46,8 @@ class DuoRnnt(GigaamV2Rnnt):
     def _encode(
         self, features: NDArray[np.float32], features_lens: NDArray[np.int64]
     ) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
+        if not np.isfinite(features).all():
+            raise ValueError("Non-finite Duo encoder input")
         output, lengths = super()._encode(features, features_lens)
         if not np.isfinite(output).all():
             raise ValueError("Non-finite Duo encoder output")
@@ -52,9 +56,15 @@ class DuoRnnt(GigaamV2Rnnt):
     def _decode(
         self, tokens: list[int], state: list[NDArray[np.float32]], frame: NDArray[np.float32]
     ) -> tuple[NDArray[np.float32], int, list[NDArray[np.float32]]]:
+        if not np.isfinite(frame).all() or any(not np.isfinite(value).all() for value in state):
+            raise ValueError("Non-finite Duo predictor or joint input")
         logits, step, new_state = super()._decode(tokens, state, frame)
-        if not np.isfinite(logits).all() or any(not np.isfinite(value).all() for value in new_state):
-            raise ValueError("Non-finite Duo predictor or joint output")
+        # The predictor may cache its output in state; all predictor data must
+        # be finite. Only individual -Inf values in final LogSoftmax are valid.
+        if any(not np.isfinite(value).all() for value in (*state, *new_state)):
+            raise ValueError("Non-finite Duo predictor output")
+        if np.isnan(logits).any() or np.isposinf(logits).any() or np.isneginf(logits).all():
+            raise ValueError("Invalid Duo joint LogSoftmax output")
         return logits, step, new_state
 
 
