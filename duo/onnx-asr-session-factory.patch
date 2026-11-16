@@ -1,0 +1,30 @@
+--- a/src/onnx_asr/models/gigaam.py
++++ b/src/onnx_asr/models/gigaam.py
+@@ -2,6 +2,7 @@
+ 
+ from collections.abc import Callable
+ from pathlib import Path
++from typing import Any
+ 
+ import numpy as np
+ import numpy.typing as npt
+@@ -71,13 +72,16 @@
+         model_files: dict[str, Path],
+         preprocessor_factory: Callable[[str], Preprocessor],
+         onnx_options: OnnxSessionOptions,
++        *,
++        session_factory: Callable[..., Any] | None = None,
+     ):
+         super().__init__(model_files, preprocessor_factory, onnx_options)
+-        self._encoder = rt.InferenceSession(
++        create_session = rt.InferenceSession if session_factory is None else session_factory
++        self._encoder = create_session(
+             model_files["encoder"], **TensorRtOptions.add_profile(onnx_options, self._encoder_shapes)
+         )
+-        self._decoder = rt.InferenceSession(model_files["decoder"], **onnx_options)
+-        self._joiner = rt.InferenceSession(model_files["joint"], **onnx_options)
++        self._decoder = create_session(model_files["decoder"], **onnx_options)
++        self._joiner = create_session(model_files["joint"], **onnx_options)
+ 
+     @staticmethod
+     def _get_model_files(quantization: str | None = None) -> dict[str, str]:

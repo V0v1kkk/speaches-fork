@@ -1375,14 +1375,6 @@ wheels = [
 ]
 
 [[package]]
-name = "onnxruntime-ep-openvino"
-version = "1.8.1"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/01/4e72a8a65b584f01d6e59eb453bae397b82b2e51df1b5c94efa05e17800b/onnxruntime_ep_openvino-1.8.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:3832643158c8c187fcab6db661cde2a8c06a2b3559d95d0f2411ac0e51c5e924", size = 52587628, upload-time = "2026-10-26T05:00:42.704Z" },
-]
-
-[[package]]
 name = "openai"
 version = "2.30.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1762,6 +1754,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/57/3c/f0196223efc5c4ca19f8fad3d5462b171ac6333013335ce540c01af419e9/opentelemetry_util_http-0.61b0.tar.gz", hash = "sha256:1039cb891334ad2731affdf034d8fb8b48c239af9b6dd295e5fabd07f1c95572", size = 11361, upload-time = "2026-03-04T14:20:57.01Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/e5/c08aaaf2f64288d2b6ef65741d2de5454e64af3e050f34285fb1907492fe/opentelemetry_util_http-0.61b0-py3-none-any.whl", hash = "sha256:8e715e848233e9527ea47e275659ea60a57a75edf5206a3b937e236a6da5fc33", size = 9281, upload-time = "2026-03-04T14:20:08.364Z" },
+]
+
+[[package]]
+name = "openvino"
+version = "2026.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "openvino-telemetry", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/96/106f20950f8636f23925fa9867f9b1d7d10dd20f7b0300b10f8da40fdf16/openvino-2026.4.0-22959-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:75245768f656afffd49078cee55b50b9501bb6778798aec3cc30e5613a86e370", size = 59130214, upload-time = "2026-09-16T14:54:33.131Z" },
+]
+
+[[package]]
+name = "openvino-telemetry"
+version = "2025.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/8a/89d82f1a9d913fb266c2e6dc2f6030935db24b7152963a8db6c4f039787f/openvino_telemetry-2025.2.0.tar.gz", hash = "sha256:8bf8127218e51e99547bf38b8fb85a8b31c9bf96e6f3a82eb0b3b6a34155977c", size = 18894, upload-time = "2025-07-07T10:29:51.159Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/ac/5ab0ca0aa269ad3c73f7bfc3801b10e5f56f75a31bf68c1ae8bd51cf70a4/openvino_telemetry-2025.2.0-py3-none-any.whl", hash = "sha256:bcb667e83a44f202ecf4cfa49281715c6d7e21499daec04ff853b7f964833599", size = 25227, upload-time = "2025-07-07T10:29:50.189Z" },
 ]
 
 [[package]]
@@ -2622,7 +2635,6 @@ dependencies = [
     { name = "numpy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "onnx-asr", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "onnxruntime", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "onnxruntime-ep-openvino", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "openai", extra = ["realtime"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "opentelemetry-distro", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "opentelemetry-exporter-otlp", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -2639,6 +2651,7 @@ dependencies = [
     { name = "opentelemetry-instrumentation-threading", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "opentelemetry-instrumentation-urllib", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "opentelemetry-instrumentation-urllib3", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "openvino", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "piper-tts", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "pyannote-audio", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "pydantic", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -2712,7 +2725,6 @@ requires-dist = [
     { name = "numpy", specifier = "==2.5.4" },
     { name = "onnx-asr", git = "https://github.com/istupakov/onnx-asr.git?rev=a2fd7530c01a78727422e592bc67ab98d96a9697" },
     { name = "onnxruntime", specifier = "==1.31.1" },
-    { name = "onnxruntime-ep-openvino", specifier = "==1.8.1" },
     { name = "openai", extras = ["realtime"], specifier = ">=2.7.1" },
     { name = "opentelemetry-distro", specifier = ">=0.61b0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.40.0" },
@@ -2729,6 +2741,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-threading", specifier = ">=0.61b0" },
     { name = "opentelemetry-instrumentation-urllib", specifier = ">=0.61b0" },
     { name = "opentelemetry-instrumentation-urllib3", specifier = ">=0.61b0" },
+    { name = "openvino", specifier = "==2026.4.0" },
     { name = "piper-tts", specifier = ">=1.3.0" },
     { name = "pyannote-audio", specifier = ">=4.0.3" },
     { name = "pydantic", specifier = ">=2.11.7" },

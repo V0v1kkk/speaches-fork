@@ -8,6 +8,7 @@ its producer. No weights are downloaded by this loader.
 import hashlib
 from pathlib import Path
 import re
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -17,6 +18,8 @@ from onnx_asr.preprocessors.numpy_preprocessor import GigaamPreprocessorNumpy
 from onnx_asr.preprocessors.resampler import Resampler
 import onnxruntime as rt
 from scipy.fft import rfft
+
+from speaches.executors.shared.openvino_session import OpenVinoSessionFactory
 
 
 class DuoPreprocessor(GigaamPreprocessorNumpy):
@@ -45,7 +48,7 @@ class DuoPreprocessor(GigaamPreprocessorNumpy):
 class CheckedPredictorSession:
     """Validate predictor tensors before they can be fed into the joint graph."""
 
-    def __init__(self, session: rt.InferenceSession) -> None:
+    def __init__(self, session: Any) -> None:
         self.session = session
 
     def run(self, output_names: list[str], feed: dict[str, object]) -> list[NDArray[np.float32]]:
@@ -107,11 +110,14 @@ _PACK_HASHES = {
 }
 
 
-def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -> TextResultsAsrAdapter:
-    """Load a prepared pack on CPU or a single, explicit OpenVINO GPU device.
+def load_duo_model(
+    path: str | Path, *, device: str = "cpu", threads: int = 2, profiling: bool = False
+) -> TextResultsAsrAdapter:
+    """Load a checked pack on CPU, CUDA:N or one explicit OpenVINO GPU.
 
-    Frontend and resampling run on CPU. The GPU option fails closed when a
-    graph cannot be assigned to the selected device; it never selects AUTO.
+    Frontend and resampling run on CPU. CUDA requires an initialized provider
+    for each graph; shape operations may stay on CPU. OpenVINO uses one
+    explicit GPU device. Neither path selects AUTO.
     """
     if threads < 1:
         raise ValueError("threads must be positive")
@@ -142,46 +148,56 @@ def load_duo_model(path: str | Path, *, device: str = "cpu", threads: int = 2) -
     ):
         raise ValueError("Invalid Duo frontend constants")
 
-    options = rt.SessionOptions()
-    options.intra_op_num_threads = threads
-    options.inter_op_num_threads = 1
-    options.execution_mode = rt.ExecutionMode.ORT_SEQUENTIAL
     if device == "cpu":
+        options = rt.SessionOptions()
+        options.intra_op_num_threads = threads
+        options.inter_op_num_threads = 1
+        options.execution_mode = rt.ExecutionMode.ORT_SEQUENTIAL
         graph_options = {"sess_options": options, "providers": ["CPUExecutionProvider"]}
+        session_factory = None
+    elif re.fullmatch(r"cuda:[0-9]+", device):
+        if "CUDAExecutionProvider" not in rt.get_available_providers():
+            raise RuntimeError("CUDAExecutionProvider is required for Duo CUDA")
+        options = rt.SessionOptions()
+        options.intra_op_num_threads = threads
+        options.inter_op_num_threads = 1
+        options.execution_mode = rt.ExecutionMode.ORT_SEQUENTIAL
+        options.enable_profiling = profiling
+        graph_options = {
+            "sess_options": options,
+            "providers": [
+                ("CUDAExecutionProvider", {
+                    "device_id": int(device.split(":")[1]),
+                    "use_tf32": 0,
+                    "arena_extend_strategy": "kSameAsRequested",
+                    "cudnn_conv_algo_search": "HEURISTIC",
+                    "cudnn_conv_use_max_workspace": "0",
+                }),
+                "CPUExecutionProvider",
+            ],
+        }
+        session_factory = None
     elif re.fullmatch(r"GPU\.[0-9]+", device):
-        import onnxruntime_ep_openvino as ov_ep
-
-        # Register once per process. A missing or ambiguous device fails closed.
-        if not any(d.ep_name == ov_ep.get_ep_name() for d in rt.get_ep_devices()):
-            rt.register_execution_provider_library("openvino_ep", ov_ep.get_library_path())
-        devices = [
-            d
-            for d in rt.get_ep_devices()
-            if d.ep_name == ov_ep.get_ep_name() and d.ep_metadata.get("ov_device") == device
-        ]
-        if len(devices) != 1:
-            raise RuntimeError(f"Expected exactly one OpenVINO device {device!r}, found {len(devices)}")
-        options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
-        options.add_session_config_entry("session.record_ep_graph_assignment_info", "1")
-        options.add_provider_for_devices(devices, {"load_config": '{"GPU":{"INFERENCE_PRECISION_HINT":"f32"}}'})
-        graph_options = {"sess_options": options}
+        graph_options = {}
+        session_factory = OpenVinoSessionFactory(device, profiling=profiling)
     else:
-        raise ValueError("device must be cpu or an explicit OpenVINO GPU name")
+        raise ValueError("device must be cpu, cuda:N or an explicit OpenVINO GPU name")
 
     def frontend(name: str) -> GigaamPreprocessorNumpy:
         if name != "gigaam_v3":
             raise ValueError(f"Unexpected Duo frontend: {name}")
         return DuoPreprocessor(window, filters)
 
-    model = DuoRnnt(model_files, frontend, graph_options)
+    if session_factory is None:
+        model = DuoRnnt(model_files, frontend, graph_options)
+    else:
+        model = DuoRnnt(model_files, frontend, graph_options, session_factory=session_factory)
+    if device.startswith("cuda:"):
+        for session in (model._encoder, model._decoder, model._joiner):  # noqa: SLF001
+            if "CUDAExecutionProvider" not in session.get_providers():
+                raise RuntimeError("Duo graph failed to initialize CUDAExecutionProvider")
     if model._blank_idx != 1024 or model._vocab_size != 1025 or model._max_tokens_per_step != 10:  # noqa: SLF001
         raise ValueError("Invalid Duo vocabulary or model configuration")
-    if device != "cpu":
-        for session in (model._encoder, model._decoder, model._joiner):  # noqa: SLF001
-            session.disable_fallback()
-            assignments = session.get_provider_graph_assignment_info()
-            if not assignments or any(part.ep_name != "OpenVINOExecutionProvider" for part in assignments):
-                raise RuntimeError("Duo graph is not fully assigned to OpenVINO")
     # The original RNNT implementation caches predictor outputs then sends
     # them to joint; validate inside run so invalid tensors never reach joint.
     model._decoder = CheckedPredictorSession(model._decoder)  # noqa: SLF001

@@ -24,6 +24,23 @@ COPY model_aliases.json /app/model_aliases.json
 COPY realtime-console /app/realtime-console
 COPY duo /app/duo
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --inexact --frozen --no-dev --no-build-isolation
+# Build the pinned upstream onnx-asr with a reviewed session-factory seam. The
+# resulting wheel has its own RECORD; neither the source nor the patch is hidden.
+RUN git clone --quiet https://github.com/istupakov/onnx-asr.git /tmp/onnx-asr-source \
+ && git -C /tmp/onnx-asr-source checkout --quiet --detach a2fd7530c01a78727422e592bc67ab98d96a9697 \
+ && echo '15879d724aab4fc71bd65bd14a38a5070ddc5788160a7a628d0766d53f51ba33  /tmp/onnx-asr-source/src/onnx_asr/models/gigaam.py' | sha256sum -c - \
+ && echo '9c01cabe03d136e40354b9680f96927c6199496228e4304e0a73e5baf6df6a54  /app/duo/onnx-asr-session-factory.patch' | sha256sum -c - \
+ && git -C /tmp/onnx-asr-source apply --check /app/duo/onnx-asr-session-factory.patch \
+ && git -C /tmp/onnx-asr-source apply /app/duo/onnx-asr-session-factory.patch \
+ && echo 'e38877eab8f793c5d96d4f739b774871bf2dee3b3aebf05faa16aa8587d47fc5  /tmp/onnx-asr-source/src/onnx_asr/models/gigaam.py' | sha256sum -c - \
+ && uv venv --python /usr/bin/python3.12 /tmp/onnx-asr-build \
+ && uv pip install --no-config --python /tmp/onnx-asr-build/bin/python --require-hashes -r /app/duo/build-requirements.txt \
+ && SOURCE_DATE_EPOCH=1792587371 VIRTUAL_ENV=/tmp/onnx-asr-build UV_PROJECT_ENVIRONMENT=/tmp/onnx-asr-build uv build --python /tmp/onnx-asr-build/bin/python --no-build-isolation --wheel --out-dir /tmp/onnx-asr-wheel /tmp/onnx-asr-source \
+ && uv pip install --python /opt/speaches-venv/bin/python --no-deps --reinstall-package onnx-asr /tmp/onnx-asr-wheel/*.whl \
+ && uv pip uninstall --python /opt/speaches-venv/bin/python hatchling hatch-vcs setuptools-scm vcs-versioning onnx onnxscript onnx-ir \
+ && python /app/duo/check_dependency_baseline.py \
+ && echo 'e38877eab8f793c5d96d4f739b774871bf2dee3b3aebf05faa16aa8587d47fc5  /opt/speaches-venv/lib/python3.12/site-packages/onnx_asr/models/gigaam.py' | sha256sum -c - \
+ && rm -rf /tmp/onnx-asr-source /tmp/onnx-asr-build /tmp/onnx-asr-wheel
 RUN useradd --create-home --uid 10001 speaches
 USER speaches
 EXPOSE 8000
